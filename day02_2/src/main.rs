@@ -8,17 +8,24 @@ fn main(input: &str) -> usize {
         .map(|cell| cell.parse::<usize>().unwrap())
         .collect::<Vec<_>>();
 
-    let mut vm = VM::new(mem);
+    for noun in 0..=99 {
+        for verb in 0..=99 {
+            let mut vm = VM::new(mem.clone());
+            vm.write(1, noun);
+            vm.write(2, verb);
 
-    // "Restore gravity assist program"
-    vm.write(1, 12);
-    vm.write(2, 2);
+            vm.run();
 
-    vm.run();
+            if vm.read(0) == 19690720 {
+                return 100 * noun + verb;
+            }
+        }
+    }
 
-    vm.read(0)
+    unreachable!()
 }
 
+#[derive(Clone)]
 struct VM {
     mem: Vec<usize>,
     ip: usize,
