@@ -1,53 +1,52 @@
 #[macro_use] extern crate aoc;
 
+use std::collections::VecDeque;
+
 #[aoc(2019, 05, 1)]
-fn main(input: &str) -> usize {
+fn main(input: &str) -> isize {
     let mem = input
         .trim()
         .split(',')
-        .map(|cell| cell.parse::<usize>().unwrap())
+        .map(|cell| cell.parse::<isize>().unwrap())
         .collect::<Vec<_>>();
 
-    for noun in 0..=99 {
-        for verb in 0..=99 {
-            let mut vm = VM::new(mem.clone());
-            vm.write(1, noun);
-            vm.write(2, verb);
+    let inputs = &[1];
 
-            vm.run();
+    let mut vm = VM::new(mem, inputs);
+    vm.run();
 
-            if vm.read(0) == 19690720 {
-                return 100 * noun + verb;
-            }
-        }
-    }
+    let outputs = vm.outputs();
 
-    unreachable!()
+    *outputs.last().unwrap()
 }
 
 #[derive(Clone)]
 struct VM {
-    mem: Vec<usize>,
+    mem: Vec<isize>,
     ip: usize,
+    inputs: VecDeque<isize>,
+    outputs: Vec<isize>,
 }
 
 impl VM {
-    fn new(mem: Vec<usize>) -> Self {
+    fn new(mem: Vec<isize>, inputs: &[isize]) -> Self {
         Self {
             mem,
             ip: 0,
+            inputs: inputs.iter().copied().collect::<VecDeque<_>>(),
+            outputs: vec![],
         }
     }
 
-    fn read(&self, addr: usize) -> usize {
+    fn read(&self, addr: usize) -> isize {
         self.mem[addr]
     }
 
-    fn write(&mut self, addr: usize, value: usize) {
+    fn write(&mut self, addr: usize, value: isize) {
         self.mem[addr] = value;
     }
 
-    fn code(&self) -> usize {
+    fn code(&self) -> isize {
         self.read(self.ip)
     }
 
@@ -55,24 +54,25 @@ impl VM {
         OpCode::parse(self.code())
     }
 
-    fn read_arg(&self, index: usize, mode: impl Into<Option<Mode>>) -> usize {
-        let mode = mode.into().unwrap_or(Mode::Position);
+    fn outputs(&self) -> &[isize] {
+        &self.outputs
+    }
 
-        match mode {
-            Mode::Immediate => self.read(self.ip + index),
+    fn read_arg(&self, index: usize, modes: &[Mode]) -> isize {
+        assert!(index > 0);
+
+        match modes.get(index - 1).unwrap_or(&Mode::Position) {
             Mode::Position => {
-                let position = self.read(self.ip + index);
-                self.read(position)
-            }
+                let addr = self.read(self.ip + index);
+                self.read(addr as usize)
+            },
+            Mode::Immediate => self.read(self.ip + index),
         }
     }
 
-    fn read_3_args(&self, modes: &[Mode]) -> (usize, usize, usize) {
-        (
-            self.read_arg(0, modes.get(0).copied()),
-            self.read_arg(1, modes.get(1).copied()),
-            self.read_arg(2, modes.get(2).copied()),
-        )
+    fn write_arg(&mut self, index: usize, value: isize) {
+        let addr = self.read(self.ip + index);
+        self.write(addr as usize, value);
     }
 
     fn run(&mut self) {
@@ -82,38 +82,54 @@ impl VM {
             match op_code.op {
                 Op::Add => self.op_add(&op_code.modes),
                 Op::Mul => self.op_mul(&op_code.modes),
+                Op::ReadInput => self.op_read_input(),
+                Op::WriteOutput => self.op_write_output(&op_code.modes),
                 Op::Halt => break,
             }
         }
     }
 
     fn op_add(&mut self, modes: &[Mode]) {
-        let (addr_a, addr_b, target) = self.read_3_args(modes);
-        let a = self.read(addr_a);
-        let b = self.read(addr_b);
-        self.write(target, a + b);
+        let a = self.read_arg(1, modes);
+        let b = self.read_arg(2, modes);
+        self.write_arg(3, a + b);
         self.ip += 4;
     }
 
     fn op_mul(&mut self, modes: &[Mode]) {
-        let (addr_a, addr_b, target) = self.read_3_args(modes);
-        let a = self.read(addr_a);
-        let b = self.read(addr_b);
-        self.write(target, a * b);
+        let a = self.read_arg(1, modes);
+        let b = self.read_arg(2, modes);
+        self.write_arg(3, a * b);
         self.ip += 4;
+    }
+
+    fn op_read_input(&mut self) {
+        let value = self.inputs.pop_front().unwrap();
+        self.write_arg(1, value);
+        self.ip += 2;
+    }
+
+    fn op_write_output(&mut self, modes: &[Mode]) {
+        let value = self.read_arg(1, modes);
+        println!("Output: {}", value);
+        self.outputs.push(value);
+        self.ip += 2;
     }
 }
 
+#[derive(Debug)]
 struct OpCode {
     op: Op,
     modes: Vec<Mode>,
 }
 
 impl OpCode {
-    fn parse(mut code: usize) -> Self {
+    fn parse(mut code: isize) -> Self {
         let op = match code % 100 {
             1 => Op::Add,
             2 => Op::Mul,
+            3 => Op::ReadInput,
+            4 => Op::WriteOutput,
             99 => Op::Halt,
             code => unreachable!("code: {}", code),
         };
@@ -138,14 +154,62 @@ impl OpCode {
     }
 }
 
+#[derive(Debug)]
 enum Op {
     Add,
     Mul,
+    ReadInput,
+    WriteOutput,
     Halt,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum Mode {
     Position,
     Immediate,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn halt() {
+        let mut vm = VM::new(
+            vec![99],
+            &[],
+        );
+        vm.run();
+    }
+
+    #[test]
+    fn add_immediate() {
+        let mut vm = VM::new(
+            vec![11_01, 2, 3, 0, 99],
+            &[],
+        );
+        vm.run();
+        assert_eq!(vm.read(0), 5);
+    }
+
+    #[test]
+    fn read_input() {
+        let mut vm = VM::new(
+            vec![3, 0, 99],
+            &[42],
+        );
+        vm.run();
+        assert_eq!(vm.read(0), 42);
+    }
+
+    #[test]
+    fn modes() {
+        let op_code = OpCode::parse(101_01);
+
+        assert_eq!(op_code.modes, [
+            Mode::Immediate,
+            Mode::Position,
+            Mode::Immediate,
+        ]);
+    }
 }
