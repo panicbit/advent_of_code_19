@@ -126,7 +126,11 @@ impl VM {
 
     fn op_write_output(&mut self, modes: &[Mode]) {
         let value = self.read_arg(1, modes);
-        println!("Output: {}", value);
+
+        if self.debug {
+            println!("Output: {}", value);
+        }
+
         self.outputs.push(value);
         self.ip += 2;
     }
