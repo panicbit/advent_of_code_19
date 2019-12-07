@@ -5,7 +5,7 @@ fn main(input: &str) -> isize {
     let mem = intcode::parse(input);
 
     let mut vm = intcode::VM::new(mem);
-    vm.set_inputs(vec![1]);
+    vm.add_input(1);
     vm.run();
 
     let outputs = vm.outputs();
