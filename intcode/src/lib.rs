@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::sync::mpsc::{channel, Sender, Receiver};
 
 pub fn parse(input: &str) -> Vec<isize> {
     input
@@ -8,11 +8,12 @@ pub fn parse(input: &str) -> Vec<isize> {
     .collect()
 }
 
-#[derive(Clone)]
 pub struct VM {
     mem: Vec<isize>,
     ip: usize,
-    inputs: VecDeque<isize>,
+    input_tx: Sender<isize>,
+    input_rx: Receiver<isize>,
+    output_tx: Option<Sender<isize>>,
     outputs: Vec<isize>,
     debug: bool,
     did_run: bool,
@@ -20,22 +21,30 @@ pub struct VM {
 
 impl VM {
     pub fn new(mem: impl Into<Vec<isize>>) -> Self {
+        let (input_tx, input_rx) = channel();
+
         Self {
             mem: mem.into(),
             ip: 0,
-            inputs: VecDeque::new(),
+            input_tx,
+            input_rx,
+            output_tx: None,
             outputs: vec![],
             debug: false,
             did_run: false,
         }
     }
 
-    pub fn set_inputs(&mut self, inputs: impl Into<Vec<isize>>) {
-        self.inputs = inputs.into().into();
+    pub fn add_input(&mut self, value: isize) {
+        self.input_tx.send(value).ok();
     }
 
-    pub fn add_input(&mut self, value: isize) {
-        self.inputs.push_back(value);
+    pub fn set_output(&mut self, output_tx: Sender<isize>) {
+        self.output_tx = Some(output_tx);
+    }
+
+    pub fn input(&self) -> Sender<isize> {
+        self.input_tx.clone()
     }
 
     pub fn set_debug(&mut self, state: bool) {
@@ -119,7 +128,8 @@ impl VM {
     }
 
     fn op_read_input(&mut self) {
-        let value = self.inputs.pop_front().unwrap();
+        let value = self.input_rx.recv().expect("failed to read value");
+
         self.write_arg(1, value);
         self.ip += 2;
     }
@@ -129,6 +139,10 @@ impl VM {
 
         if self.debug {
             println!("Output: {}", value);
+        }
+
+        if let Some(output_tx) = &self.output_tx {
+            output_tx.send(value).ok();
         }
 
         self.outputs.push(value);
@@ -256,7 +270,7 @@ mod tests {
     #[test]
     fn read_input() {
         let mut vm = VM::new(vec![3, 0, 99]);
-        vm.set_inputs(vec![42]);
+        vm.add_input(42);
         vm.run();
         assert_eq!(vm.read(0), 42);
     }
