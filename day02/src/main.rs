@@ -1,34 +1,20 @@
 #[macro_use] extern crate aoc;
 
 #[aoc(2019, 02, 1)]
-fn main(input: &str) -> usize {
-    let mut mem = input
+fn main(input: &str) -> isize {
+    let mem = input
         .trim()
         .split(',')
-        .map(|cell| cell.parse::<usize>().unwrap())
+        .map(|cell| cell.parse::<isize>().unwrap())
         .collect::<Vec<_>>();
 
+    let mut vm = intcode::VM::new(mem);
+
     // "Restore gravity assist program"
-    mem[1] = 12;
-    mem[2] = 2;
+    vm.write(1, 12);
+    vm.write(2, 2);
 
-    let mut ip = 0;
+    vm.run();
 
-    loop {
-        let opcode = mem[ip];
-        let a = mem[ip + 1];
-        let b = mem[ip + 2];
-        let target = mem[ip + 3];
-
-        match opcode {
-            1 => mem[target] = mem[a] + mem[b],
-            2 => mem[target] = mem[a] * mem[b],
-            99 => break,
-            code => unreachable!("code: {}", code),
-        }
-
-        ip += 4;
-    }
-
-    mem[0]
+    vm.read(0)
 }
