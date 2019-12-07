@@ -2,11 +2,7 @@
 
 #[aoc(2019, 02, 2)]
 fn main(input: &str) -> isize {
-    let mem = input
-        .trim()
-        .split(',')
-        .map(|cell| cell.parse::<isize>().unwrap())
-        .collect::<Vec<_>>();
+    let mem = intcode::parse(input);
 
     for noun in 0..=99 {
         for verb in 0..=99 {

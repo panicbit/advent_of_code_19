@@ -1,5 +1,13 @@
 use std::collections::VecDeque;
 
+pub fn parse(input: &str) -> Vec<isize> {
+    input
+    .trim()
+    .split(',')
+    .map(|cell| cell.parse::<isize>().unwrap())
+    .collect()
+}
+
 #[derive(Clone)]
 pub struct VM {
     mem: Vec<isize>,
