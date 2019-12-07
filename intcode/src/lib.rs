@@ -26,6 +26,10 @@ impl VM {
         self.inputs = inputs.into().into();
     }
 
+    pub fn add_input(&mut self, value: isize) {
+        self.inputs.push_back(value);
+    }
+
     pub fn set_debug(&mut self, state: bool) {
         self.debug = state;
     }
