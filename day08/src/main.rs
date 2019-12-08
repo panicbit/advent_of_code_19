@@ -9,10 +9,9 @@ fn main(input: &str) -> usize {
     let stride = width * height;
     let layers: Vec<Layer> =
         input
-        .trim()
-        .split("")
-        .filter(|&n| n != "")
-        .map(|n| n.parse::<i32>().unwrap())
+        .chars()
+        .map(|c| c.to_digit(10))
+        .flatten()
         .chunks(stride)
         .into_iter()
         .map(|layer| Layer::parse(layer))
@@ -38,24 +37,24 @@ fn main(input: &str) -> usize {
 }
 
 struct Layer {
-    pixels: Vec<i32>,
+    pixels: Vec<u32>,
 }
 
 impl Layer {
-    fn parse(pixels: impl Iterator<Item = i32>) -> Self {
+    fn parse(pixels: impl Iterator<Item = u32>) -> Self {
         Layer {
             pixels: pixels.collect()
         }
     }
 
-    fn pixels(&self) -> impl Iterator<Item = i32> + '_ {
+    fn pixels(&self) -> impl Iterator<Item = u32> + '_ {
         self
         .pixels
         .iter()
         .copied()
     }
 
-    fn count_pixels(&self, mut f: impl FnMut(i32) -> bool) -> usize {
+    fn count_pixels(&self, mut f: impl FnMut(u32) -> bool) -> usize {
         self
         .pixels()
         .filter(|&pixel| f(pixel))
