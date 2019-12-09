@@ -11,6 +11,7 @@ pub fn parse(input: &str) -> Vec<isize> {
 pub struct VM {
     mem: Vec<isize>,
     ip: usize,
+    relative_base: isize,
     input_tx: Sender<isize>,
     input_rx: Receiver<isize>,
     output_tx: Option<Sender<isize>>,
@@ -26,6 +27,7 @@ impl VM {
         Self {
             mem: mem.into(),
             ip: 0,
+            relative_base: 0,
             input_tx,
             input_rx,
             output_tx: None,
@@ -52,10 +54,21 @@ impl VM {
     }
 
     pub fn read(&self, addr: usize) -> isize {
-        self.mem[addr]
+        let value = self.mem.get(addr).copied().unwrap_or(0);
+
+        if self.debug {
+            println!("read({}) -> {}", addr, value);
+        }
+
+        value
     }
 
     pub fn write(&mut self, addr: usize, value: isize) {
+        if self.debug {
+            println!("write({}) -> {}", addr, value);
+        }
+
+        self.ensure_mem_size(addr + 1);
         self.mem[addr] = value;
     }
 
@@ -74,17 +87,28 @@ impl VM {
     fn read_arg(&self, index: usize, modes: &[Mode]) -> isize {
         assert!(index > 0);
 
-        match modes.get(index - 1).unwrap_or(&Mode::Position) {
-            Mode::Position => {
-                let addr = self.read(self.ip + index);
-                self.read(addr as usize)
-            },
-            Mode::Immediate => self.read(self.ip + index),
-        }
+        let addr = match modes.get(index - 1).unwrap_or(&Mode::Position) {
+            Mode::Position => self.read(self.ip + index),
+            Mode::Immediate => (self.ip + index) as isize,
+            Mode::Relative => {
+                let offset = self.read(self.ip + index);
+                self.relative_base + offset
+            }
+        };
+
+        self.read(addr as usize)
     }
 
-    fn write_arg(&mut self, index: usize, value: isize) {
-        let addr = self.read(self.ip + index);
+    fn write_arg(&mut self, index: usize, value: isize, modes: &[Mode]) {
+        assert!(index > 0);
+
+        let arg = self.read(self.ip + index);
+
+        let addr = match modes.get(index -1).unwrap_or(&Mode::Position) {
+            Mode::Position | Mode::Immediate => arg,
+            Mode::Relative => self.relative_base + arg,
+        };
+
         self.write(addr as usize, value);
     }
 
@@ -102,35 +126,42 @@ impl VM {
             match op_code.op {
                 Op::Add => self.op_add(modes),
                 Op::Mul => self.op_mul(modes),
-                Op::ReadInput => self.op_read_input(),
+                Op::ReadInput => self.op_read_input(modes),
                 Op::WriteOutput => self.op_write_output(modes),
                 Op::JumpIfTrue => self.op_jump_if_true(modes),
                 Op::JumpIfFalse => self.op_jump_if_false(modes),
                 Op::LessThan => self.op_less_than(modes),
                 Op::Equals => self.op_equals(modes),
+                Op::AdjustRelativeBase => self.op_adjust_relative_base(modes),
                 Op::Halt => break,
             }
+        }
+    }
+
+    fn ensure_mem_size(&mut self, size: usize) {
+        while self.mem.len() < size {
+            self.mem.push(0);
         }
     }
 
     fn op_add(&mut self, modes: &[Mode]) {
         let a = self.read_arg(1, modes);
         let b = self.read_arg(2, modes);
-        self.write_arg(3, a + b);
+        self.write_arg(3, a + b, modes);
         self.ip += 4;
     }
 
     fn op_mul(&mut self, modes: &[Mode]) {
         let a = self.read_arg(1, modes);
         let b = self.read_arg(2, modes);
-        self.write_arg(3, a * b);
+        self.write_arg(3, a * b, modes);
         self.ip += 4;
     }
 
-    fn op_read_input(&mut self) {
+    fn op_read_input(&mut self, modes: &[Mode]) {
         let value = self.input_rx.recv().expect("failed to read value");
 
-        self.write_arg(1, value);
+        self.write_arg(1, value, modes);
         self.ip += 2;
     }
 
@@ -176,7 +207,7 @@ impl VM {
         let b = self.read_arg(2, modes);
         let value = (a < b) as isize;
 
-        self.write_arg(3, value);
+        self.write_arg(3, value, modes);
         self.ip += 4;
     }
 
@@ -185,8 +216,19 @@ impl VM {
         let b = self.read_arg(2, modes);
         let value = (a == b) as isize;
 
-        self.write_arg(3, value);
+        self.write_arg(3, value, modes);
         self.ip += 4;
+    }
+
+    fn op_adjust_relative_base(&mut self, modes: &[Mode]) {
+        let adjustment = self.read_arg(1, modes);
+        self.relative_base += adjustment;
+
+        if self.debug {
+            println!("new relative base: {}", self.relative_base);
+        }
+
+        self.ip += 2;
     }
 }
 
@@ -207,6 +249,7 @@ impl OpCode {
             6 => Op::JumpIfFalse,
             7 => Op::LessThan,
             8 => Op::Equals,
+            9 => Op::AdjustRelativeBase,
             99 => Op::Halt,
             code => unreachable!("code: {}", code),
         };
@@ -218,6 +261,7 @@ impl OpCode {
             let mode = match code % 10 {
                 0 => Mode::Position,
                 1 => Mode::Immediate,
+                2 => Mode::Relative,
                 mode => unreachable!("mode: {}", mode),
             };
 
@@ -241,6 +285,7 @@ enum Op {
     JumpIfFalse,
     LessThan,
     Equals,
+    AdjustRelativeBase,
     Halt,
 }
 
@@ -248,6 +293,7 @@ enum Op {
 enum Mode {
     Position,
     Immediate,
+    Relative,
 }
 
 #[cfg(test)]
@@ -277,12 +323,12 @@ mod tests {
 
     #[test]
     fn modes() {
-        let op_code = OpCode::parse(101_01);
+        let op_code = OpCode::parse(201_01);
 
         assert_eq!(op_code.modes, [
             Mode::Immediate,
             Mode::Position,
-            Mode::Immediate,
+            Mode::Relative,
         ]);
     }
 }
