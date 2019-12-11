@@ -17,40 +17,38 @@ fn main(input: &str) -> isize {
 }
 
 fn run_series(mem: &[isize], phases: Vec<isize>) -> isize {
-    let mut stages: Vec<VM> = phases
+    let (tx, rx) = channel();
+    let rx = phases
         .into_iter()
-        .map(|phase| {
-            let mut vm = intcode::VM::new(mem);
-            vm.add_input(phase);
-            vm
-        })
-        .collect();
+        .rev()
+        .fold(rx, |rx, phase| {
+            let (tx, new_rx) = channel();
 
-    // hook up stage inputs and outputs
-    for i in 1..stages.len() {
-        let input = stages[i].input();
-        stages[i-1].set_output(input);
-    }
+            let mut vm = VM::new(mem);
 
-    let first_stage = stages.first_mut().unwrap();
-    let input_tx = first_stage.input();
+            vm.queue_input(phase);
 
-    let (output_tx, output_rx) = channel();
-    let last_stage = stages.last_mut().unwrap();
-    last_stage.set_output(output_tx);
+            vm.set_input_provider(move |_| {
+                let signal = rx.recv().unwrap();
+                signal
+            });
 
-    // run stages
-    for mut stage in stages {
-        thread::spawn(move || stage.run());
-    }
+            vm.set_on_output(move |_, signal| {
+                tx.send(signal).ok();
+            });
 
-    // send initial signgal to first stage
-    input_tx.send(0).ok();
+            thread::spawn(move || vm.run());
+
+            new_rx
+        });
+
+    // send initial signal to first stage
+    tx.send(0).ok();
 
     let mut signal = 0;
-    while let Ok(new_signal) = output_rx.recv() {
+    while let Ok(new_signal) = rx.recv() {
         signal = new_signal;
-        input_tx.send(new_signal).ok();
+        tx.send(new_signal).ok();
     }
 
     signal

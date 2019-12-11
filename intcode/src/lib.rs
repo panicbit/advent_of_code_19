@@ -1,5 +1,7 @@
 use std::sync::mpsc::{channel, Sender, Receiver};
 
+use std::collections::VecDeque;
+
 pub fn parse(input: &str) -> Vec<isize> {
     input
     .trim()
@@ -12,6 +14,7 @@ pub struct VM<'a, Context = ()> {
     mem: Vec<isize>,
     ip: usize,
     relative_base: isize,
+    input_queue: VecDeque<isize>,
     input_tx: Sender<isize>,
     input_rx: Receiver<isize>,
     output_tx: Option<Sender<isize>>,
@@ -37,6 +40,7 @@ impl<'a, Context> VM<'a, Context> {
             mem: mem.into(),
             ip: 0,
             relative_base: 0,
+            input_queue: VecDeque::new(),
             input_tx,
             input_rx,
             output_tx: None,
@@ -59,6 +63,10 @@ impl<'a, Context> VM<'a, Context> {
 
     pub fn add_input(&mut self, value: isize) {
         self.input_tx.send(value).ok();
+    }
+
+    pub fn queue_input(&mut self, value: isize) {
+        self.input_queue.push_back(value);
     }
 
     pub fn set_output(&mut self, output_tx: Sender<isize>) {
@@ -210,9 +218,12 @@ impl<'a, Context> VM<'a, Context> {
     }
 
     fn op_read_input(&mut self, modes: &[Mode]) {
-        let value = match &mut self.input_provider {
-            Some(input_provider) => input_provider(&mut self.context),
-            None => self.input_rx.recv().expect("failed to read value")
+        let queued_input = self.input_queue.pop_front();
+
+        let value = match (queued_input, &mut self.input_provider) {
+            (Some(queued_input), _) => queued_input,
+            (_, Some(input_provider)) => input_provider(&mut self.context),
+            _ => self.input_rx.recv().expect("failed to read value"),
         };
 
         self.write_arg(1, value, modes);
