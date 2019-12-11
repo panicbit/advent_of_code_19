@@ -8,7 +8,7 @@ pub fn parse(input: &str) -> Vec<isize> {
     .collect()
 }
 
-pub struct VM {
+pub struct VM<'a> {
     mem: Vec<isize>,
     ip: usize,
     relative_base: isize,
@@ -16,11 +16,13 @@ pub struct VM {
     input_rx: Receiver<isize>,
     output_tx: Option<Sender<isize>>,
     outputs: Vec<isize>,
+    input_provider: Option<Box<dyn FnMut() -> isize + 'a>>,
+    on_output: Option<Box<dyn FnMut(isize) + 'a>>,
     debug: bool,
     did_run: bool,
 }
 
-impl VM {
+impl<'a> VM<'a> {
     pub fn new(mem: impl Into<Vec<isize>>) -> Self {
         let (input_tx, input_rx) = channel();
 
@@ -32,9 +34,19 @@ impl VM {
             input_rx,
             output_tx: None,
             outputs: vec![],
+            input_provider: None,
+            on_output: None,
             debug: false,
             did_run: false,
         }
+    }
+
+    pub fn set_on_output(&mut self, f: impl FnMut(isize) + 'a) {
+        self.on_output = Some(Box::new(f));
+    }
+
+    pub fn set_input_provider(&mut self, f: impl FnMut() -> isize + 'a) {
+        self.input_provider = Some(Box::new(f));
     }
 
     pub fn add_input(&mut self, value: isize) {
@@ -159,7 +171,10 @@ impl VM {
     }
 
     fn op_read_input(&mut self, modes: &[Mode]) {
-        let value = self.input_rx.recv().expect("failed to read value");
+        let value = match &mut self.input_provider {
+            Some(input_provider) => input_provider(),
+            None => self.input_rx.recv().expect("failed to read value")
+        };
 
         self.write_arg(1, value, modes);
         self.ip += 2;
@@ -170,6 +185,10 @@ impl VM {
 
         if self.debug {
             println!("Output: {}", value);
+        }
+
+        if let Some(on_output) = &mut self.on_output {
+            on_output(value);
         }
 
         if let Some(output_tx) = &self.output_tx {
@@ -333,7 +352,7 @@ mod tests {
     }
 }
 
-impl Drop for VM {
+impl Drop for VM<'_> {
     fn drop(&mut self) {
         if !self.did_run {
             eprintln!("WARNING: VM did not run");
