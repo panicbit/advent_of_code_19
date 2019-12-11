@@ -8,7 +8,7 @@ pub fn parse(input: &str) -> Vec<isize> {
     .collect()
 }
 
-pub struct VM<'a, Context> {
+pub struct VM<'a, Context = ()> {
     mem: Vec<isize>,
     ip: usize,
     relative_base: isize,
@@ -16,8 +16,8 @@ pub struct VM<'a, Context> {
     input_rx: Receiver<isize>,
     output_tx: Option<Sender<isize>>,
     outputs: Vec<isize>,
-    input_provider: Option<Box<dyn FnMut(&mut Context) -> isize + 'a>>,
-    on_output: Option<Box<dyn FnMut(&mut Context, isize) + 'a>>,
+    input_provider: Option<Box<dyn FnMut(&mut Context) -> isize + Send + 'a>>,
+    on_output: Option<Box<dyn FnMut(&mut Context, isize) + Send + 'a>>,
     debug: bool,
     did_run: bool,
     context: Context,
@@ -49,11 +49,11 @@ impl<'a, Context> VM<'a, Context> {
         }
     }
 
-    pub fn set_on_output(&mut self, f: impl FnMut(&mut Context, isize) + 'a) {
+    pub fn set_on_output(&mut self, f: impl FnMut(&mut Context, isize) + Send + 'a) {
         self.on_output = Some(Box::new(f));
     }
 
-    pub fn set_input_provider(&mut self, f: impl FnMut(&mut Context, ) -> isize + 'a) {
+    pub fn set_input_provider(&mut self, f: impl FnMut(&mut Context, ) -> isize + Send + 'a) {
         self.input_provider = Some(Box::new(f));
     }
 
@@ -94,6 +94,10 @@ impl<'a, Context> VM<'a, Context> {
 
     pub fn outputs(&self) -> &[isize] {
         &self.outputs
+    }
+
+    pub fn last_output(&self) -> Option<isize> {
+        self.outputs.last().copied()
     }
 
     fn code(&self) -> isize {
