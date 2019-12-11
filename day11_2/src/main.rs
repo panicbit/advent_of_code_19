@@ -1,66 +1,63 @@
 #[macro_use] extern crate aoc;
 
 use std::collections::HashMap;
+use intcode::{VM, Op};
 
 #[aoc(2019, 11, 2)]
 fn main(input: &str) -> usize {
-    
-    let mut state = State {
-        hull: HashMap::new(),
-        next_input: NextInput::Color,
-        direction: Direction::Up,
-        x: 0,
-        y: 0,
-    };
-
-    state.hull.insert((0, 0), true);
-    
     let mem = intcode::parse(input);
-    let mut vm = intcode::VM::with_context(mem, &mut state);
+    let mut vm = VM::new(mem);
 
-    vm.set_on_output(|state, output| {
-        match state.next_input {
-            NextInput::Color => {
-                let is_white = match output {
-                    0 => false,
-                    1 => true,
-                    _ => panic!("invalid color {}", output),
-                };
+    let mut hull = HashMap::new();
+    let mut direction = Direction::Up;
+    let mut x = 0;
+    let mut y = 0;
+    let mut next_output = NextOutput::Color;
 
-                state.hull.insert((state.x, state.y), is_white);
-                state.next_input = NextInput::Direction;
-            },
-            NextInput::Direction => {
-                match output {
-                    0 => state.direction.turn_left(),
-                    1 => state.direction.turn_right(),
-                    _ => panic!("invalid turn {}", output)
-                }
+    hull.insert((0, 0), true);
 
-                state.direction.go(&mut state.x, &mut state.y);
-                state.next_input = NextInput::Color;
+    vm.run_tracing(|vm, prev, next| {
+        if prev.op() == Op::WriteOutput {
+            let output = vm.outputs().last().unwrap();
+
+            match next_output {
+                NextOutput::Color => {
+                    let is_white = match output {
+                        0 => false,
+                        1 => true,
+                        _ => panic!("invalid color {}", output),
+                    };
+
+                    hull.insert((x, y), is_white);
+                    next_output = NextOutput::Direction;
+                },
+                NextOutput::Direction => {
+                    match output {
+                        0 => direction.turn_left(),
+                        1 => direction.turn_right(),
+                        _ => panic!("invalid turn {}", output)
+                    }
+
+                    direction.go(&mut x, &mut y);
+                    next_output = NextOutput::Color;
+                },
             }
         }
 
+        if next.op() == Op::ReadInput {
+            let color = hull.get(&(x, y)).copied().unwrap_or(false) as isize;
+            vm.add_input(color);
+        }
     });
 
-    vm.set_input_provider(|state| {
-        state.hull.get(&(state.x, state.y))
-            .cloned()
-            .unwrap_or(false) as isize
-    });
-
-    vm.run();
-    drop(vm);
-
-    let min_x = state.hull.keys().map(|(x, _)| *x).min().unwrap_or(0);
-    let max_x = state.hull.keys().map(|(x, _)| *x).max().unwrap_or(0);
-    let min_y = state.hull.keys().map(|(_, y)| *y).min().unwrap_or(0);
-    let max_y = state.hull.keys().map(|(_, y)| *y).max().unwrap_or(0);
+    let min_x = hull.keys().map(|(x, _)| *x).min().unwrap_or(0);
+    let max_x = hull.keys().map(|(x, _)| *x).max().unwrap_or(0);
+    let min_y = hull.keys().map(|(_, y)| *y).min().unwrap_or(0);
+    let max_y = hull.keys().map(|(_, y)| *y).max().unwrap_or(0);
 
     for y in (min_y ..= max_y).rev() {
         for x in min_x ..= max_x {
-            let is_white = state.hull.get(&(x, y)).copied().unwrap_or(false);
+            let is_white = hull.get(&(x, y)).copied().unwrap_or(false);
 
             if is_white {
                 print!("█");
@@ -75,16 +72,7 @@ fn main(input: &str) -> usize {
     panic!("NEED HUMAN HELP")
 }
 
-struct State {
-    hull: HashMap<(i32, i32), bool>,
-    next_input: NextInput,
-    direction: Direction,
-    x: i32,
-    y: i32,
-}
-
-#[derive(Copy,Clone)]
-enum NextInput {
+enum NextOutput {
     Color,
     Direction,
 }

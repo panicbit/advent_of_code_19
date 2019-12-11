@@ -136,6 +136,26 @@ impl<'a, Context> VM<'a, Context> {
         while !self.step().is_halt() {}
     }
 
+    pub fn run_tracing(&mut self, mut tracer: impl FnMut(&mut Self, OpCode, &OpCode)) {
+        let mut previous_op_code = OpCode {
+            op: Op::Halt,
+            modes: vec![],
+        };
+
+        loop {
+            let next_op_code = self.next_op_code();
+
+            tracer(self, previous_op_code, &next_op_code);
+            self.execute(&next_op_code);
+
+            if next_op_code.is_halt() {
+                return;
+            }
+
+            previous_op_code = next_op_code;
+        }
+    }
+
     pub fn step(&mut self) -> OpCode {
         let next_op_code = self.next_op_code();
         self.execute(&next_op_code);
@@ -308,8 +328,8 @@ impl OpCode {
         }
     }
 
-    pub fn op(&self) -> &Op {
-        &self.op
+    pub fn op(&self) -> Op {
+        self.op
     }
 
     pub fn modes(&self) -> &[Mode] {
@@ -321,7 +341,7 @@ impl OpCode {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Op {
     Add,
     Mul,

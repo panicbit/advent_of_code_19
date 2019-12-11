@@ -1,69 +1,57 @@
 #[macro_use] extern crate aoc;
 
 use std::collections::HashMap;
+use intcode::{VM, Op};
 
 #[aoc(2019, 11, 1)]
 fn main(input: &str) -> usize {
-    
-    let mut state = State {
-        hull: HashMap::new(),
-        next_input: NextInput::Color,
-        direction: Direction::Up,
-        x: 0,
-        y: 0,
-    };
-    
     let mem = intcode::parse(input);
-    let mut vm = intcode::VM::with_context(mem, &mut state);
+    let mut vm = VM::new(mem);
 
-    vm.set_on_output(|state, output| {
-        match state.next_input {
-            NextInput::Color => {
-                let is_white = match output {
-                    0 => false,
-                    1 => true,
-                    _ => panic!("invalid color {}", output),
-                };
+    let mut hull = HashMap::new();
+    let mut direction = Direction::Up;
+    let mut x = 0;
+    let mut y = 0;
+    let mut next_output = NextOutput::Color;
 
-                state.hull.insert((state.x, state.y), is_white);
-                state.next_input = NextInput::Direction;
-            },
-            NextInput::Direction => {
-                match output {
-                    0 => state.direction.turn_left(),
-                    1 => state.direction.turn_right(),
-                    _ => panic!("invalid turn {}", output)
-                }
+    vm.run_tracing(|vm, prev, next| {
+        if prev.op() == Op::WriteOutput {
+            let output = vm.outputs().last().unwrap();
 
-                state.direction.go(&mut state.x, &mut state.y);
-                state.next_input = NextInput::Color;
+            match next_output {
+                NextOutput::Color => {
+                    let is_white = match output {
+                        0 => false,
+                        1 => true,
+                        _ => panic!("invalid color {}", output),
+                    };
+
+                    hull.insert((x, y), is_white);
+                    next_output = NextOutput::Direction;
+                },
+                NextOutput::Direction => {
+                    match output {
+                        0 => direction.turn_left(),
+                        1 => direction.turn_right(),
+                        _ => panic!("invalid turn {}", output)
+                    }
+
+                    direction.go(&mut x, &mut y);
+                    next_output = NextOutput::Color;
+                },
             }
         }
 
+        if next.op() == Op::ReadInput {
+            let color = hull.get(&(x, y)).copied().unwrap_or(false) as isize;
+            vm.add_input(color);
+        }
     });
 
-    vm.set_input_provider(|state| {
-        state.hull.get(&(state.x, state.y))
-            .cloned()
-            .unwrap_or(false) as isize
-    });
-
-    vm.run();
-    drop(vm);
-
-    state.hull.values().count()
+    hull.values().count()
 }
 
-struct State {
-    hull: HashMap<(i32, i32), bool>,
-    next_input: NextInput,
-    direction: Direction,
-    x: i32,
-    y: i32,
-}
-
-#[derive(Copy,Clone)]
-enum NextInput {
+enum NextOutput {
     Color,
     Direction,
 }
