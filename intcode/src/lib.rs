@@ -8,7 +8,7 @@ pub fn parse(input: &str) -> Vec<isize> {
     .collect()
 }
 
-pub struct VM<'a> {
+pub struct VM<'a, Context> {
     mem: Vec<isize>,
     ip: usize,
     relative_base: isize,
@@ -16,14 +16,21 @@ pub struct VM<'a> {
     input_rx: Receiver<isize>,
     output_tx: Option<Sender<isize>>,
     outputs: Vec<isize>,
-    input_provider: Option<Box<dyn FnMut() -> isize + 'a>>,
-    on_output: Option<Box<dyn FnMut(isize) + 'a>>,
+    input_provider: Option<Box<dyn FnMut(&mut Context) -> isize + 'a>>,
+    on_output: Option<Box<dyn FnMut(&mut Context, isize) + 'a>>,
     debug: bool,
     did_run: bool,
+    context: Context,
 }
 
-impl<'a> VM<'a> {
+impl VM<'_, ()> {
     pub fn new(mem: impl Into<Vec<isize>>) -> Self {
+        Self::with_context(mem, ())
+    }
+}
+
+impl<'a, Context> VM<'a, Context> {
+    pub fn with_context(mem: impl Into<Vec<isize>>, context: Context) -> Self {
         let (input_tx, input_rx) = channel();
 
         Self {
@@ -38,14 +45,15 @@ impl<'a> VM<'a> {
             on_output: None,
             debug: false,
             did_run: false,
+            context,
         }
     }
 
-    pub fn set_on_output(&mut self, f: impl FnMut(isize) + 'a) {
+    pub fn set_on_output(&mut self, f: impl FnMut(&mut Context, isize) + 'a) {
         self.on_output = Some(Box::new(f));
     }
 
-    pub fn set_input_provider(&mut self, f: impl FnMut() -> isize + 'a) {
+    pub fn set_input_provider(&mut self, f: impl FnMut(&mut Context, ) -> isize + 'a) {
         self.input_provider = Some(Box::new(f));
     }
 
@@ -92,7 +100,7 @@ impl<'a> VM<'a> {
         self.read(self.ip)
     }
 
-    fn op_code(&self) -> OpCode {
+    pub fn next_op_code(&self) -> OpCode {
         OpCode::parse(self.code())
     }
 
@@ -125,28 +133,35 @@ impl<'a> VM<'a> {
     }
 
     pub fn run(&mut self) {
+        while !self.step().is_halt() {}
+    }
+
+    pub fn step(&mut self) -> OpCode {
+        let next_op_code = self.next_op_code();
+        self.execute(&next_op_code);
+        next_op_code
+    }
+
+    pub fn execute(&mut self, op_code: &OpCode) {
         self.did_run = true;
 
-        loop {
-            let op_code = self.op_code();
-            let modes = &op_code.modes;
+        let modes = &op_code.modes;
 
-            if self.debug {
-                println!("{:?}", op_code);
-            }
+        if self.debug {
+            println!("{:?}", op_code);
+        }
 
-            match op_code.op {
-                Op::Add => self.op_add(modes),
-                Op::Mul => self.op_mul(modes),
-                Op::ReadInput => self.op_read_input(modes),
-                Op::WriteOutput => self.op_write_output(modes),
-                Op::JumpIfTrue => self.op_jump_if_true(modes),
-                Op::JumpIfFalse => self.op_jump_if_false(modes),
-                Op::LessThan => self.op_less_than(modes),
-                Op::Equals => self.op_equals(modes),
-                Op::AdjustRelativeBase => self.op_adjust_relative_base(modes),
-                Op::Halt => break,
-            }
+        match op_code.op {
+            Op::Add => self.op_add(modes),
+            Op::Mul => self.op_mul(modes),
+            Op::ReadInput => self.op_read_input(modes),
+            Op::WriteOutput => self.op_write_output(modes),
+            Op::JumpIfTrue => self.op_jump_if_true(modes),
+            Op::JumpIfFalse => self.op_jump_if_false(modes),
+            Op::LessThan => self.op_less_than(modes),
+            Op::Equals => self.op_equals(modes),
+            Op::AdjustRelativeBase => self.op_adjust_relative_base(modes),
+            Op::Halt => {},
         }
     }
 
@@ -172,7 +187,7 @@ impl<'a> VM<'a> {
 
     fn op_read_input(&mut self, modes: &[Mode]) {
         let value = match &mut self.input_provider {
-            Some(input_provider) => input_provider(),
+            Some(input_provider) => input_provider(&mut self.context),
             None => self.input_rx.recv().expect("failed to read value")
         };
 
@@ -188,7 +203,7 @@ impl<'a> VM<'a> {
         }
 
         if let Some(on_output) = &mut self.on_output {
-            on_output(value);
+            on_output(&mut self.context, value);
         }
 
         if let Some(output_tx) = &self.output_tx {
@@ -252,7 +267,7 @@ impl<'a> VM<'a> {
 }
 
 #[derive(Debug)]
-struct OpCode {
+pub struct OpCode {
     op: Op,
     modes: Vec<Mode>,
 }
@@ -292,10 +307,22 @@ impl OpCode {
             op, modes
         }
     }
+
+    pub fn op(&self) -> &Op {
+        &self.op
+    }
+
+    pub fn modes(&self) -> &[Mode] {
+        &self.modes
+    }
+
+    pub fn is_halt(&self) -> bool {
+        self.op == Op::Halt
+    }
 }
 
-#[derive(Debug)]
-enum Op {
+#[derive(Debug, PartialEq)]
+pub enum Op {
     Add,
     Mul,
     ReadInput,
@@ -309,7 +336,7 @@ enum Op {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-enum Mode {
+pub enum Mode {
     Position,
     Immediate,
     Relative,
@@ -352,7 +379,7 @@ mod tests {
     }
 }
 
-impl Drop for VM<'_> {
+impl<Context> Drop for VM<'_, Context> {
     fn drop(&mut self) {
         if !self.did_run {
             eprintln!("WARNING: VM did not run");

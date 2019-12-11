@@ -1,25 +1,22 @@
 #[macro_use] extern crate aoc;
 
 use std::collections::HashMap;
-use std::cell::RefCell;
 
 #[aoc(2019, 11, 1)]
 fn main(input: &str) -> usize {
     
-    let state = RefCell::new(State {
+    let mut state = State {
         hull: HashMap::new(),
         next_input: NextInput::Color,
         direction: Direction::Up,
         x: 0,
         y: 0,
-    });
+    };
     
     let mem = intcode::parse(input);
-    let mut vm = intcode::VM::new(mem);
+    let mut vm = intcode::VM::with_context(mem, &mut state);
 
-    vm.set_on_output(|output| {
-        let state = &mut *state.borrow_mut();
-
+    vm.set_on_output(|state, output| {
         match state.next_input {
             NextInput::Color => {
                 let is_white = match output {
@@ -45,16 +42,14 @@ fn main(input: &str) -> usize {
 
     });
 
-    vm.set_input_provider(|| {
-        let state = state.borrow();
+    vm.set_input_provider(|state| {
         state.hull.get(&(state.x, state.y))
             .cloned()
             .unwrap_or(false) as isize
     });
 
     vm.run();
-
-    let state = state.borrow();
+    drop(vm);
 
     state.hull.values().count()
 }
